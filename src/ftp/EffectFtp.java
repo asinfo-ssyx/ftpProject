@@ -18,6 +18,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.commons.net.ftp.FTPClient;
 import org.apache.commons.net.ftp.FTPFile;
@@ -33,6 +35,8 @@ public class EffectFtp {
 
 	public static void main(String[] args) throws Exception {
 		String nowDay=DateUtil.getNowDateYYYY_MM_DD();
+		String currentTime =DateUtil.getNowDateStr();
+		System.out.println("程序运行时间：  "+currentTime);
 		String sql=" SELECT url,max(end_time) end_time FROM active_info WHERE " +
 				" date_sub(begin_time,interval 1 day)<'"+nowDay+"' and end_time>'"+nowDay+"' AND status=2 and url is NOT NULL and url <>'' " +
 						" group by url ";
@@ -58,11 +62,33 @@ public class EffectFtp {
 		if(conn!=null)conn.close();
 
 		if(file.size()>0){
-			File createFile=new File("/interface/yangsy/filelog/urllog_"+nowDay+".txt");
-			//File createFile=new File("C:\\Users\\Hero\\Desktop\\urllog_"+nowDay+".txt");
+			//online
+			//File createFile=new File("/interface/yangsy/filelog/urllog_"+nowDay+".txt");
+			//test
+		//	File createFile=new File("H:\\zyx\\urllog_"+nowDay+".txt");
+			File createFile=new File("/opt/tomcat_ssyx/ftpProject/ftpupload/urllog_"+nowDay+".txt");
+			System.out.println("file uploadpath :"+createFile.getPath());
 			FileWriter fw=new FileWriter(createFile);
 			for (Map<String, String> map : file) {
-				fw.write(map.get("url").trim()+","+map.get("endTime").substring(0,10).trim());
+				//test 只截取一级域名
+				String data=null;
+				String newUrl ="";
+				if(map.get("url").trim().contains("https")){
+					data =getDataRegex(map.get("url").trim(),"https://","/");
+					if(data == null)
+						newUrl=map.get("url").trim();
+					else newUrl="https://"+data+"/";
+				}
+				else {
+					data =getDataRegex(map.get("url").trim(),"http://","/");
+					if(data == null)
+						newUrl=map.get("url").trim();
+					else newUrl="http://"+data+"/";
+				}
+			//	System.out.println("newUrl : "+newUrl);
+				fw.write(newUrl+","+map.get("endTime").substring(0,10).trim());
+				//online
+				//	fw.write(map.get("url").trim()+","+map.get("endTime").substring(0,10).trim());
 				fw.write("\n");
 			}
 			fw.close();
@@ -70,8 +96,12 @@ public class EffectFtp {
 			//创建文件/thetabin/push/logfile/
 
 			InputStream inputStream = new FileInputStream(createFile);
-
-			boolean boo=uploadFile("10.25.88.75",-1,"push","push123","/thetabin/push/","urlconfig.txt",inputStream);
+			//online
+//			boolean boo=uploadFile("10.25.88.75",-1,"push","push123","/thetabin/push/","urlconfig.txt",inputStream);
+			//test
+		//	boolean boo=uploadFile("192.168.163.129",-1,"zyx","zyx123","/home/zyx/ftpupload","urlconfig.txt",inputStream);
+		//	boolean boo=uploadFile("10.108.226.124",-1,"wwt008","......","D:\\test\\","urlconfig.txt",inputStream);
+			boolean boo=uploadFile("10.112.1.134",-1,"aiapp","as1a1nf0","/d2_data1/aiapp/zyx/ftpProject/push/","urlconfig.txt",inputStream);
 			if(boo){
 				System.out.println("上传成功！");
 			}else{
@@ -79,10 +109,20 @@ public class EffectFtp {
 			}
 
 			String directoryName=DateUtil.getNowDateMinusDayYYYYMMDD(1)+"/";
-			File mkdir=new File("/interface/yangsy/getfile/"+directoryName);
+			//online
+//			File mkdir=new File("/interface/yangsy/getfile/"+directoryName);
+			//test
+		//	String directoryName1=DateUtil.getNowDateMinusDayYYYYMMDD(1)+"\\";
+		//	File mkdir=new File("H:\\zyx\\tt\\"+directoryName1);
+			File mkdir=new File("/opt/tomcat_ssyx/ftpProject/ftpdownload/"+directoryName);
 			if(!mkdir.exists())mkdir.mkdir();
-			boo=downloadFile("10.25.88.75",-1,"push","push123",
-					"/thetabin/push/url/"+directoryName,"","/interface/yangsy/getfile/"+directoryName);
+//			boo=downloadFile("10.25.88.75",-1,"push","push123",
+//					"/thetabin/push/url/"+directoryName,"","/interface/yangsy/getfile/"+directoryName);
+		//	boo=downloadFile("192.168.163.129",-1,"zyx","zyx123",
+			//		"/home/zyx/ftpdownload/"+directoryName,"","H:\\zyx\\tt\\"+directoryName1);
+			boo=downloadFile("10.112.1.134",-1,"aiapp","as1a1nf0",
+				"/d2_data1/aiapp/zyx/ftpProject/pull/"+directoryName,"","/opt/tomcat_ssyx/ftpProject/ftpdownload/"+directoryName);
+			
 			if(boo){
 				System.out.println("下载成功！");
 			}else{
@@ -91,7 +131,11 @@ public class EffectFtp {
 
 			if(boo){//下载成功后开始处理文件
 				initActiveUrlMap();
-				File[] files=getFiles("/interface/yangsy/getfile/"+directoryName);
+				//online
+			    //	File[] files=getFiles("/interface/yangsy/getfile/"+directoryName);
+			     //test
+					File[] files=getFiles("/opt/tomcat_ssyx/ftpProject/ftpdownload/"+directoryName);
+				// File[] files=getFiles("H:\\zyx\\tt\\"+directoryName1);
 				List<Map<String,String>> list=null;
 				for (File f : files) {
 					list=readFileByLines(f);
@@ -101,15 +145,39 @@ public class EffectFtp {
 
 				//处理数据
 				List<Map<String,String>> countActive=getPushActiveCount();
-				for (Map<String, String> map : countActive) {
+				if(countActive.size()==0)
+					System.out.println("统计0个数据插入mysql库");
+				else System.out.println("统计"+countActive.size()+"个数据插入mysql库");
+				 if (countActive !=null && countActive.size() !=0){
+				   for (Map<String, String> map : countActive) {
 					updateEffectActive(map);
-				}
+				    }
+				 }
 			}
 		}else{
 			System.out.println("当天时间没有需要统计url的活动");
 		}
 
 	}
+	
+	/**
+	 * 正则表达式获取字符串
+	 * @param res
+	 * @param beginStr
+	 * @param endStr
+	 * @return
+	 */
+	public  static String getDataRegex(String res,String beginStr,String endStr){
+    	Pattern p = Pattern.compile(beginStr+"([\\s\\S]*?)"+endStr);  
+		Matcher m = p.matcher(res);  
+		
+		if(m.find())
+		{
+			return m.group(1);
+		}
+		return null;
+
+    }
 
 	/**
 	 * 更新统计数据表
@@ -184,15 +252,16 @@ public class EffectFtp {
             }
 
             // 登录FTP
-            ftp.login(username, password);
+           ftp.login(username, password);
             reply = ftp.getReplyCode();
             if (!FTPReply.isPositiveCompletion(reply)){
                 ftp.disconnect();
                 return success;
             }
+            //online
             ftp.changeWorkingDirectory(path);
+            ftp.deleteFile(filename);//先删除之前的文件，如果文件没有则不删除（ftp自己会判断）
             ftp.storeFile(filename, input);
-
             input.close();
             ftp.logout();
             success = true;
@@ -242,6 +311,7 @@ public class EffectFtp {
                 ftp.disconnect();
                 return success;
             }
+               ftp.mkd(remotePath);
             ftp.changeWorkingDirectory(remotePath);//转移到FTP服务器目录
             FTPFile[] fs = ftp.listFiles();
             for (FTPFile ff : fs){
@@ -251,6 +321,9 @@ public class EffectFtp {
                     if(!localFile.exists()) localFile.createNewFile();
                     OutputStream is = new FileOutputStream(localFile);
                     ftp.retrieveFile(ff.getName(), is);
+                    //test
+                    is.flush();
+                    //
                     is.close();
                 }
             }
@@ -278,6 +351,10 @@ public class EffectFtp {
     	initActiveSendPhone();
     	String createTime=DateUtil.getNowDateMinusDayYYYY_MM_DD(1)+" 00:00:00";
     	for (int i = 0; i < list.size(); i++) {
+    		if(list.get(i).get("activeCode")==null){
+    			System.out.println("该文件中的url没有activeCode对应");
+    			continue;
+    		}
     		if(activePhone.get(list.get(i).get("activeCode").trim())==null){
     			System.out.println("当前活动未发生短信："+list.get(i).get("activeCode"));
     			continue;
@@ -294,7 +371,7 @@ public class EffectFtp {
     		"'"+list.get(i).get("url")+"',"+
     		""+list.get(i).get("flow")+","+
     		"'"+createTime+"' )";
-    		//System.out.println("sql="+initSql);
+    		System.out.println("sql="+initSql);
 
 			insertMysqlDB(initSql);
 			} catch (Exception e) {
@@ -320,7 +397,7 @@ public class EffectFtp {
      * @throws Exception
      */
     public static void initActiveUrlMap(){
-    	String sql="SELECT * FROM active_info WHERE  status=2 and url is NOT NULL and url <>''";
+    	String sql="SELECT * FROM active_info WHERE  status=2 and url is NOT NULL and url <>'' order by begin_time asc";
     	Connection conn=DataBaseJdbc.get85MysqlConnection();
 		Statement stmt=null;
 		ResultSet set=null;
@@ -330,7 +407,22 @@ public class EffectFtp {
 		set = stmt.executeQuery(sql);
 		while(set.next()){
 			if(set.getString("url")!=null&&!"".equals(set.getString("url"))){
-				activeUrl.put(set.getString("url").trim(),set.getString("active_code").trim());
+				//test截取一级域名
+				String data =getDataRegex(set.getString("url").trim(),"http://","/");
+				String newUrl ="";
+				if(set.getString("url").trim().contains("https")){
+					data =getDataRegex(set.getString("url").trim(),"https://","/");
+					if(data == null)
+						newUrl=set.getString("url").trim();
+					else newUrl="https://"+data+"/";
+				}
+				else {
+					data =getDataRegex(set.getString("url").trim(),"http://","/");
+					if(data == null)
+						newUrl=set.getString("url").trim();
+					else newUrl="http://"+data+"/";
+				}
+				activeUrl.put(newUrl,set.getString("active_code").trim());
 			}
 		}
 		} catch (SQLException e) {
@@ -378,15 +470,19 @@ public class EffectFtp {
             String[] ss=null;
             while ((tempString = reader.readLine()) != null) {
             	aum=new HashMap<String,String>();
-            	ss=tempString.split("\\s+");
+            	ss=tempString.split("\t");
+            //	System.out.println("s0:"+ss[0]+"s1:"+ss[1]+"s2:"+ss[2]);
             	if(ss.length>2){
-            		aum.put("phoneNo", ss[3]);
-            		aum.put("url", ss[2]);
-            		aum.put("flow", ss[4]);
+            		if(ss[1].length()>13)
+            		aum.put("phoneNo", ss[1].substring(3,14));//删除区号：+86
+            		else 
+            		aum.put("phoneNo", ss[1]);
+            		aum.put("url", ss[0]);
+            		aum.put("flow", ss[2]);
             		addActiveCodeToUrl(aum); //continue;
             		slist.add(aum);
             	}
-                System.out.println("line " + line + ": " + tempString);
+                System.out.println("line " + line + ": " + "phoneNo :" +aum.get("phoneNo")+" url: "+aum.get("url")+" activeCode "+aum.get("activeCode")+" flow: "+aum.get("flow"));
                 line++;
             }
             reader.close();
