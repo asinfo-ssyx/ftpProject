@@ -21,7 +21,7 @@ public class DataBaseJdbc {
 //	public static String  password134="as1a1nf0";
 	//test
 	public static String  driver134="com.ibm.db2.jcc.DB2Driver";
-	public static String  url134="jdbc:db2://127.0.0.1:50000/aiapp";
+	public static String  url134="jdbc:db2://10.108.226.71:50000/aiapp";
 	public static String  user134="aiapp";
 	public static String  password134="zyx123";
 

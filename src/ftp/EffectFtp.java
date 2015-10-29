@@ -10,7 +10,9 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.math.BigInteger;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -34,12 +36,15 @@ public class EffectFtp {
 
 
 	public static void main(String[] args) throws Exception {
+	//	insertResult();
 		String nowDay=DateUtil.getNowDateYYYY_MM_DD();
 		String currentTime =DateUtil.getNowDateStr();
 		System.out.println("程序运行时间：  "+currentTime);
 		String sql=" SELECT url,max(end_time) end_time FROM active_info WHERE " +
 				" date_sub(begin_time,interval 1 day)<'"+nowDay+"' and end_time>'"+nowDay+"' AND status=2 and url is NOT NULL and url <>'' " +
 						" group by url ";
+	    //test 
+	//	String sql ="select active_code ,url,begin_time ,end_time  from active_info where begin_time > '2015-10-20 00:00:00' and begin_time< '2015-10-27 00:00:00' and url is not null and url <> '' ";
 		//String sql=" SELECT * FROM active_info WHERE status=2 and url is NOT NULL";
 		Connection conn=DataBaseJdbc.get85MysqlConnection();
 		Statement stmt=null;
@@ -70,25 +75,26 @@ public class EffectFtp {
 			System.out.println("file uploadpath :"+createFile.getPath());
 			FileWriter fw=new FileWriter(createFile);
 			for (Map<String, String> map : file) {
-				//test 只截取一级域名
+//				//test 只截取一级域名
 				String data=null;
 				String newUrl ="";
-				if(map.get("url").trim().contains("https")){
+				if(map.get("url").trim().contains("https://")){
 					data =getDataRegex(map.get("url").trim(),"https://","/");
 					if(data == null)
-						newUrl=map.get("url").trim();
-					else newUrl="https://"+data+"/";
+						newUrl=map.get("url").trim().substring(8);
+					else newUrl=data;
 				}
-				else {
+				else if(map.get("url").trim().contains("http://"))  {
 					data =getDataRegex(map.get("url").trim(),"http://","/");
 					if(data == null)
-						newUrl=map.get("url").trim();
-					else newUrl="http://"+data+"/";
+						newUrl=map.get("url").trim().substring(7);
+					else newUrl=data;
 				}
-			//	System.out.println("newUrl : "+newUrl);
+				else newUrl =map.get("url").trim();
+//			//	System.out.println("newUrl : "+newUrl);
 				fw.write(newUrl+","+map.get("endTime").substring(0,10).trim());
-				//online
-				//	fw.write(map.get("url").trim()+","+map.get("endTime").substring(0,10).trim());
+//				//online
+//				//	fw.write(map.get("url").trim()+","+map.get("endTime").substring(0,10).trim());
 				fw.write("\n");
 			}
 			fw.close();
@@ -118,8 +124,9 @@ public class EffectFtp {
 			if(!mkdir.exists())mkdir.mkdir();
 //			boo=downloadFile("10.25.88.75",-1,"push","push123",
 //					"/thetabin/push/url/"+directoryName,"","/interface/yangsy/getfile/"+directoryName);
-		//	boo=downloadFile("192.168.163.129",-1,"zyx","zyx123",
-			//		"/home/zyx/ftpdownload/"+directoryName,"","H:\\zyx\\tt\\"+directoryName1);
+//		boo=downloadFile("192.168.163.129",-1,"zyx","zyx123",
+//					"/home/zyx/ftpdownload/"+directoryName,"","H:\\zyx\\tt\\"+directoryName1);
+		// System.out.println(directoryName.toString());
 			boo=downloadFile("10.112.1.134",-1,"aiapp","as1a1nf0",
 				"/d2_data1/aiapp/zyx/ftpProject/pull/"+directoryName,"","/opt/tomcat_ssyx/ftpProject/ftpdownload/"+directoryName);
 			
@@ -130,36 +137,200 @@ public class EffectFtp {
 			}
 
 			if(boo){//下载成功后开始处理文件
-				initActiveUrlMap();
+			//	initActiveUrlMap();
 				//online
 			    //	File[] files=getFiles("/interface/yangsy/getfile/"+directoryName);
 			     //test
 					File[] files=getFiles("/opt/tomcat_ssyx/ftpProject/ftpdownload/"+directoryName);
-				// File[] files=getFiles("H:\\zyx\\tt\\"+directoryName1);
+			//	 File[] files=getFiles("H:\\zyx\\tt\\"+directoryName1);
 				List<Map<String,String>> list=null;
 				for (File f : files) {
 					list=readFileByLines(f);
+					//删除7天之前的从ftp接收的数据
+					deleteFtpDataBeforeWeek();
+					//将所有接收到的数据入Db2库做个备份
+					insertFtpGetData(list);
 					System.out.println("执行 文件插入:"+list.size());
-					insertResultData(list);
+					insertResult();
+				//	insertResultData(list);
 				}
 
 				//处理数据
-				List<Map<String,String>> countActive=getPushActiveCount();
-				if(countActive.size()==0)
-					System.out.println("统计0个数据插入mysql库");
-				else System.out.println("统计"+countActive.size()+"个数据插入mysql库");
-				 if (countActive !=null && countActive.size() !=0){
-				   for (Map<String, String> map : countActive) {
-					updateEffectActive(map);
-				    }
-				 }
+//				List<Map<String,String>> countActive=getPushActiveCount();
+//				if(countActive.size()==0)
+//					System.out.println("统计0个数据插入mysql库");
+//				else System.out.println("统计"+countActive.size()+"个数据插入mysql库");
+//				 if (countActive !=null && countActive.size() !=0){
+//				   for (Map<String, String> map : countActive) {
+					updateEffectActive();
+//				    }
+//				 }
 			}
 		}else{
 			System.out.println("当天时间没有需要统计url的活动");
 		}
 
 	}
+    /**
+     * @user : Administrator
+     * @Description : 将数据插入effect_wap_push 表
+     * @Date : 2015年10月28日
+     */
+    public static void insertResult(){
+    	String createTime=DateUtil.getNowDateMinusDayYYYY_MM_DD(1)+" 00:00:00";
+    	String createDate=DateUtil.getNowDateMinusDayYYYY_MM_DD(1);
+    	String sql1="select a.active_code ,a.phone_no,b.url,b.flow_num  from (select active_code , phone_no ,send_ms from aiapp.send_sms_log ) a"
+    			+ " join (select * from aiapp.ssyx_effect_ftp_data where create_date ='"+createDate+"') b "
+    			+ "on a.phone_no =b.phone_no where a.send_ms like '%'||b.url||'%' ";
+    	String sql2="insert into effect_wap_push(active_code,phone_no,push_url,flow_num,create_time ) values(?,?,?,?,?) ";
+//    	List<String> list = initActiveUrlMap();
+//    	System.out.println("url 不为空的活动个数 :"+list.size());
+    	Connection conn=null;
+    	Connection conn1=null;
+    	try {
+    		conn =DataBaseJdbc.get134MysqlConnection();
+    		conn1 =DataBaseJdbc.get85MysqlConnection();
+    		conn1.setAutoCommit(false);
+			Statement st =conn.createStatement();
+			PreparedStatement pst =conn1.prepareStatement(sql2, ResultSet.TYPE_SCROLL_SENSITIVE,ResultSet.CONCUR_READ_ONLY);
+	     	ResultSet set =	st.executeQuery(sql1);
+	     	int i =0;
+		    while(set.next()){
+		    				pst.setString(1, set.getString(1));
+		    		    	pst.setString(2, set.getString(2));
+		    		    	pst.setString(3, set.getString(3));
+		    		    	pst.setInt(4,  (int)set.getLong(4));
+		    		    	pst.setString(5, createTime);
+		    		    	pst.addBatch();
+		    	 if(i%2000==0){//每2000条提交一次
+            		 pst.executeBatch();
+            		 conn1.commit();
+            	}
+		     i++;
+		    }
+		    pst.executeBatch();
+		    conn1.commit();
+		    System.out.println("成功匹配数据量 ： "+i);
+		    if(set!=null) set.close();
+		    if(st!=null) st.close();
+		    if(conn!=null) conn.close();
+		    if(pst!=null) pst.close();
+		    if(conn1!=null) conn1.close();
+		} catch (SQLException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			System.out.println("插入effect_wap_push 表出错 ===========>" +e.getMessage());
+		}
+    	
+    }
+    /**
+     * @user : Administrator
+     * @Description : 删除ssy_effect_ftp_data 表中7天之前的数据
+     * @return
+     * @Date : 2015年10月29日
+     */
+    public static boolean deleteFtpDataBeforeWeek(){
+    	boolean b =true;
+    	Connection conn=null;
+    	Statement st =null;
+    	String deleteSql ="delete from aiapp.ssyx_effect_ftp_data where create_date < current date -8 days";
+    	try {
+    		conn =DataBaseJdbc.get134MysqlConnection();
+			st =conn.createStatement();
+			st.execute(deleteSql);
+			System.out.println("清空ssyx_effect_ftp_data 7天数据成功");
+		} catch (SQLException e) {
+			// TODO Auto-generated catch block
+			b=false;
+			System.out.println("删除ssyx_effect_ftp_data数据异常 =========》 "+e.getMessage());
+		}finally{
+				try {
+					if(st !=null) st.close();
+					if(conn !=null) conn.close();
+				} catch (SQLException e) {
+					// TODO Auto-generated catch block
+					b=false;
+					System.out.println("关闭数据库连接异常 =========》 "+e.getMessage());
+				}
+		}
+    	
+    	return b;
+    }
+	/**
+	 * @user : Administrator
+	 * @Description : 将下载的所有数据都存入db2数据库中
+	 * @param list
+	 * @return
+	 * @Date : 2015年10月27日
+	 */
+	public static boolean insertFtpGetData(List<Map<String, String>> list){
+		String date=DateUtil.getNowDateMinusDayYYYY_MM_DD(1);
+		Connection conn=null;
+		boolean b=true ;
+		if(list!=null){
+		try {
+			conn =DataBaseJdbc.get134MysqlConnection();
+			conn.setAutoCommit(false);
+			String initSql="insert into aiapp.ssyx_effect_ftp_data(active_code,phone_no,url,flow_num,create_date) values(?,?,?,?,?) ";
+			PreparedStatement prest = conn.prepareStatement(initSql,ResultSet.TYPE_SCROLL_SENSITIVE,ResultSet.CONCUR_READ_ONLY);
+			for(int j=0;j<list.size();j++){
+				prest.setString(1, list.get(j).get("activeCode"));
+				prest.setString(2, list.get(j).get("phoneNo"));
+				prest.setString(3, list.get(j).get("url"));
+				prest.setLong(4, Long.valueOf(list.get(j).get("flow").trim()));
+				prest.setString(5, date);
+				prest.addBatch();
+				     if(j>0){
+                	    if(j%2000==0){//每2000条提交一次
+                		 prest.executeBatch();
+                		 conn.commit();
+                	}
+                }
+			}
+			prest.executeBatch();
+			conn.commit();
+	        conn.close();
+		} catch (SQLException e1) {
+			// TODO Auto-generated catch block
+			b=false;
+			System.out.println("sqlException >>>>>>>>"+e1.getMessage());
+		}
 	
+//			for(int j=0;j<list.size();){
+//
+//				String initSql="insert into aiapp.ssyx_effect_ftp_data(active_code,phone_no,url,flow_num,create_date) values "+
+//			    		"('"+list.get(j).get("activeCode")+"',"+
+//			    		"'"+list.get(j).get("phoneNo")+"',"+
+//			    		"'"+list.get(j).get("url")+"',"+
+//			    		""+Long.valueOf(list.get(j).get("flow").trim())+","+
+//			    		"'"+date+"' )";
+//				System.out.println("sql "+initSql);
+//				j++;
+//				try {
+//					
+//					insertDb2(initSql);
+//				} catch (Exception e) {
+//					// TODO Auto-generated catch b
+//					System.out.println("sqlException >>>>>>>>"+e.getMessage());
+//					return false;
+//				}
+//				
+//			}
+			System.out.println("今天获取的电话号码条数："+list.size());
+		}
+		else b=false;
+		return b;
+	}
+	public static boolean insertDb2(String sql) throws SQLException{
+		Connection conn=DataBaseJdbc.get134MysqlConnection();
+		Statement stmt=null;
+		stmt=conn.createStatement();
+		int cr=stmt.executeUpdate(sql);
+		if(stmt!=null)stmt.close();
+		if(conn!=null)conn.close();
+		if(cr>0) return true;
+		else return false;
+	}
 	/**
 	 * 正则表达式获取字符串
 	 * @param res
@@ -184,16 +355,20 @@ public class EffectFtp {
 	 * @param map
 	 * @throws SQLException
 	 */
-	public static void updateEffectActive(Map<String,String> map) throws SQLException{
-		int userNum=Integer.parseInt(map.get("pushc"));
-		int flowNum=Integer.parseInt(map.get("sumflow"));
-		String sql="update effect_active set tran_count=tran_count+"+userNum+",flow_count=flow_count+"+flowNum+" " +
-				   		" where active_code='"+map.get("activeCode")+"'";
+	public static void updateEffectActive() throws SQLException{
+//		int userNum=Integer.parseInt(map.get("pushc"));
+//		int flowNum=Integer.parseInt(map.get("sumflow"));
+		String create_time =DateUtil.getNowDateMinusDayYYYY_MM_DD(1)+"00:00:00";
+//		String sql="update effect_active set tran_count=tran_count+"+userNum+",flow_count=flow_count+"+flowNum+" " +
+//				   		" where active_code='"+map.get("activeCode")+"'";
+		String sql=" update  effect_active c join (  select a.active_code , a.flow ,a.number  from (select active_code,sum(flow_num) flow, count(1) number from effect_wap_push where create_time ='"+create_time+"' group by active_code) a "
+				+ "join (select active_code ,url from active_info  where url is not null and url <> '') b on a.active_code = b.active_code  ) "
+				+ "d  on c.active_code = d.active_code  set c.tran_count = c.tran_count + d.number , c.flow_count = flow_count + d.flow ";
     	Connection conn=DataBaseJdbc.get85MysqlConnection();
 		Statement stmt=null;
 		stmt=conn.createStatement();
 		stmt.executeUpdate(sql);
-		System.out.println("更新活动："+map.get("activeCode"));
+		System.out.println("将效果跟踪情况更新到effec_active成功");
 		if(stmt!=null)stmt.close();
 		if(conn!=null)conn.close();
 	}
@@ -396,37 +571,47 @@ public class EffectFtp {
      * 获取活动和url之间的对于关系 ，统计返回数据需要用到
      * @throws Exception
      */
-    public static void initActiveUrlMap(){
-    	String sql="SELECT * FROM active_info WHERE  status=2 and url is NOT NULL and url <>'' order by begin_time asc";
+    public static List<String> initActiveUrlMap(){
+  //  	String sql="SELECT * FROM active_info WHERE  status=2 and url is NOT NULL and url <>'' order by begin_time asc";
+		String nowDay=DateUtil.getNowDateYYYY_MM_DD();
+		String currentTime =DateUtil.getNowDateStr();
+    	String sql=" SELECT active_code  FROM active_info WHERE " +
+		" date_sub(begin_time,interval 1 day)<'"+nowDay+"' and end_time>'"+nowDay+"' AND status=2 and url is NOT NULL and url <>'' " +
+				" group by url ";
     	Connection conn=DataBaseJdbc.get85MysqlConnection();
 		Statement stmt=null;
 		ResultSet set=null;
+		List<String> list=null;
 		try {
 			stmt=conn.createStatement();
-
-		set = stmt.executeQuery(sql);
+	     	set = stmt.executeQuery(sql);
+	      	list=new ArrayList<String>();
 		while(set.next()){
-			if(set.getString("url")!=null&&!"".equals(set.getString("url"))){
-				//test截取一级域名
-				String data =getDataRegex(set.getString("url").trim(),"http://","/");
-				String newUrl ="";
-				if(set.getString("url").trim().contains("https")){
-					data =getDataRegex(set.getString("url").trim(),"https://","/");
-					if(data == null)
-						newUrl=set.getString("url").trim();
-					else newUrl="https://"+data+"/";
-				}
-				else {
-					data =getDataRegex(set.getString("url").trim(),"http://","/");
-					if(data == null)
-						newUrl=set.getString("url").trim();
-					else newUrl="http://"+data+"/";
-				}
-				activeUrl.put(newUrl,set.getString("active_code").trim());
-			}
-		}
+			list.add(set.getString("active_code"));
+//			if(set.getString("url")!=null&&!"".equals(set.getString("url"))){
+//				//test截取一级域名
+//				String data =getDataRegex(set.getString("url").trim(),"http://","/");
+//				String newUrl ="";
+//				if(set.getString("url").trim().contains("https://")){
+//					data =getDataRegex(set.getString("url").trim(),"https://","/");
+//					if(data == null)
+//						newUrl=set.getString("url").trim().substring(8);
+//					else newUrl=data;
+//				}
+//				else if(set.getString("url").trim().contains("http://")) {
+//					data =getDataRegex(set.getString("url").trim(),"http://","/");
+//					if(data == null)
+//						newUrl=set.getString("url").trim().substring(7);
+//					else newUrl=data;
+//				}
+//				else newUrl =set.getString("url").trim();
+//				activeUrl.put(newUrl,set.getString("active_code").trim());
+//			}
+		  }
+	
 		} catch (SQLException e) {
 			System.out.println("初始化出错"+e.getMessage());
+			return null;
 		}finally{
 
 				try {
@@ -438,6 +623,7 @@ public class EffectFtp {
 					e.printStackTrace();
 				}
 		}
+		return list;
 		//System.out.println("activeUrlactiveUrlactiveUrl:"+activeUrl);
     }
 
@@ -474,7 +660,7 @@ public class EffectFtp {
             //	System.out.println("s0:"+ss[0]+"s1:"+ss[1]+"s2:"+ss[2]);
             	if(ss.length>2){
             		if(ss[1].length()>13)
-            		aum.put("phoneNo", ss[1].substring(3,14));//删除区号：+86
+            		aum.put("phoneNo", ss[1].substring(3));//删除区号：+86
             		else 
             		aum.put("phoneNo", ss[1]);
             		aum.put("url", ss[0]);
